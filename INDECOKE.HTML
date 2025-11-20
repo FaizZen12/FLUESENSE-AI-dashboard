@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FLUSENSE | AI Dashboard</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* --- 1. CSS VARIABLES & RESET (Sama seperti sebelumnya) --- */
+        :root {
+            --neon-blue: #00f3ff;
+            --neon-purple: #bc13fe;
+            --neon-green: #0aff0a;
+            --neon-red: #ff0055;
+            --neon-amber: #ffae00;
+            --bg-dark: #050510;
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --font-main: 'Rajdhani', sans-serif;
+            --font-header: 'Orbitron', sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg-dark);
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(188, 19, 254, 0.1), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(0, 243, 255, 0.1), transparent 25%);
+            color: #fff;
+            font-family: var(--font-main);
+            height: 100vh;
+            padding: 20px;
+            overflow: hidden; /* Supaya dashboard fit di layar */
+        }
+
+        /* --- 2. UTILITY CLASSES --- */
+        .glass {
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            border-radius: 15px;
+        }
+        
+        .neon-text { text-shadow: 0 0 10px currentColor; }
+        .text-blue { color: var(--neon-blue); }
+        .text-purple { color: var(--neon-purple); }
+        .text-green { color: var(--neon-green); }
+        .text-red { color: var(--neon-red); }
+
+        /* --- 3. LAYOUT GRID --- */
+        .container {
+            display: grid;
+            grid-template-columns: 300px 1fr 300px;
+            grid-template-rows: 60px 1fr 1fr;
+            gap: 20px;
+            height: 100%;
+        }
+
+        /* Header */
+        .header {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+        }
+        .brand { font-family: var(--font-header); font-size: 24px; letter-spacing: 2px; }
+        .status-dot {
+            height: 10px; width: 10px; border-radius: 50%;
+            background-color: var(--neon-red); /* Default Red (Offline) */
+            box-shadow: 0 0 10px var(--neon-red);
+            display: inline-block; margin-right: 8px;
+        }
+
+        /* Left Panel: Stats */
+        .left-panel {
+            grid-row: 2 / -1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .stat-card {
+            padding: 20px;
+            text-align: center;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .stat-num { font-family: var(--font-header); font-size: 3rem; line-height: 1; }
+        .stat-label { font-size: 1rem; opacity: 0.7; letter-spacing: 1px; margin-top: 5px; }
+
+        /* Center Panel: Camera & Chart */
+        .center-panel {
+            grid-column: 2;
+            grid-row: 2 / -1;
+            display: grid;
+            grid-template-rows: 2fr 1fr;
+            gap: 20px;
+        }
+        
+        .cam-box {
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--neon-blue);
+        }
+        
+        /* Elemen Video Base64 */
+        #camFeed {
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* Agar rasio video tidak gepeng */
+        }
+
+        .overlay-text {
+            position: absolute; top: 10px; left: 10px;
+            background: rgba(0,0,0,0.7); padding: 5px 10px;
+            border-radius: 4px; font-size: 0.8rem; color: var(--neon-blue);
+        }
+
+        .chart-box { padding: 15px; position: relative; }
+
+        /* Right Panel: Sensors & Mic */
+        .right-panel {
+            grid-row: 2 / -1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .sensor-row { display: flex; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px; }
+        .sensor-val { font-weight: bold; font-family: var(--font-header); }
+
+        .mic-box {
+            text-align: center;
+            padding: 20px;
+        }
+        .db-meter {
+            font-size: 2.5rem;
+            font-family: var(--font-header);
+            color: var(--neon-purple);
+            margin: 10px 0;
+        }
+        .cough-alert {
+            background: rgba(255, 0, 85, 0.2);
+            color: var(--neon-red);
+            padding: 5px;
+            border-radius: 4px;
+            font-weight: bold;
+            opacity: 0; /* Hidden by default */
+            transition: opacity 0.3s;
+        }
+
+        .weather-box { padding: 20px; text-align: center; }
+        .rec-box {
+            padding: 15px;
+            border-left: 4px solid var(--neon-amber);
+            background: linear-gradient(90deg, rgba(255,174,0,0.1), transparent);
+        }
+        
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header class="header glass">
+            <div class="brand neon-text text-blue">FLUSENSE <span style="font-size:0.6em; color:white;">AI DASHBOARD</span></div>
+            <div style="display:flex; align-items:center;">
+                <span id="connStatus" class="status-dot"></span>
+                <span id="connText" style="font-size: 0.9rem; letter-spacing: 1px;">CONNECTING...</span>
+            </div>
+        </header>
+
+        <div class="left-panel">
+            <div class="stat-card glass" style="border-bottom: 3px solid white;">
+                <div class="stat-num neon-text" id="peopleCount">0</div>
+                <div class="stat-label">TOTAL PEOPLE</div>
+            </div>
+            <div class="stat-card glass" style="border-bottom: 3px solid var(--neon-green);">
+                <div class="stat-num text-green neon-text" id="maskCount">0</div>
+                <div class="stat-label">MASK DETECTED</div>
+            </div>
+            <div class="stat-card glass" style="border-bottom: 3px solid var(--neon-red);">
+                <div class="stat-num text-red neon-text" id="nomaskCount">0</div>
+                <div class="stat-label">NO MASK</div>
+            </div>
+            <div class="stat-card glass">
+                <div style="font-size: 0.9rem; color: #aaa;">RISK STATUS</div>
+                <div id="riskLevel" style="font-size: 1.5rem; font-weight: bold; margin-top: 5px;">--</div>
+            </div>
+        </div>
+
+        <div class="center-panel">
+            <div class="cam-box glass">
+                <div class="overlay-text">LIVE YOLOv11 FEED</div>
+                <img id="camFeed" src="" alt="Waiting for Camera Source...">
+            </div>
+
+            <div class="chart-box glass">
+                <canvas id="envChart"></canvas>
+            </div>
+        </div>
+
+        <div class="right-panel">
+            <div class="glass" style="padding: 20px;">
+                <h4 class="text-blue" style="margin-bottom: 15px;">ROOM SENSORS</h4>
+                <div class="sensor-row">
+                    <span>Temperature</span>
+                    <span class="sensor-val text-blue" id="tempVal">--°C</span>
+                </div>
+                <div class="sensor-row">
+                    <span>Humidity</span>
+                    <span class="sensor-val text-purple" id="humVal">--%</span>
+                </div>
+                <div class="sensor-row" style="border:none;">
+                    <span>CO2 Level</span>
+                    <span class="sensor-val text-green" id="co2Val">-- ppm</span>
+                </div>
+            </div>
+
+            <div class="mic-box glass">
+                <h4 style="color: #aaa; margin-bottom: 5px;">AUDIO LEVEL</h4>
+                <div class="db-meter neon-text" id="micDb">0 dB</div>
+                <div id="coughAlert" class="cough-alert">POTENSI BATUK</div>
+            </div>
+
+            <div class="weather-box glass">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="font-size: 2.5rem;" id="weatherIcon">☁️</div>
+                    <div style="text-align: right;">
+                        <div id="weatherTemp" style="font-size: 1.5rem; font-weight:bold;">--°C</div>
+                        <div id="weatherDesc" style="font-size: 0.8rem; opacity:0.8;">--</div>
+                    </div>
+                </div>
+                <div id="seasonBadge" style="margin-top: 10px; font-weight:bold; color: var(--neon-amber);">MUSIM --</div>
+            </div>
+
+            <div class="rec-box glass">
+                <div style="font-size: 0.7rem; text-transform:uppercase; letter-spacing:1px; margin-bottom:5px;">AI Recommendation</div>
+                <div id="recText" style="font-size: 0.9rem; line-height: 1.4;">Waiting for data...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. INITIAL CONFIG & VARS ---
+        const socketUrl = "http://127.0.0.1:5000";
+        let envChart; 
+        let yoloConnected = false; // Status koneksi YOLO
+
+        // --- 2. CHART JS SETUP ---
+        const ctx = document.getElementById('envChart').getContext('2d');
+        envChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(20).fill(''), 
+                datasets: [{
+                    label: 'CO2 (ppm)',
+                    data: Array(20).fill(400),
+                    borderColor: '#00f3ff',
+                    backgroundColor: 'rgba(0, 243, 255, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true,
+                    yAxisID: 'y'
+                }, {
+                    label: 'Temp (°C)',
+                    data: Array(20).fill(24),
+                    borderColor: '#ffae00',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    pointRadius: 0,
+                    yAxisID: 'y1'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: 'white', font: { size: 10 } } } },
+                scales: {
+                    x: { display: false }, 
+                    y: { 
+                        type: 'linear', display: true, position: 'left',
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#00f3ff' },
+                        min: 0, max: 1500
+                    },
+                    y1: {
+                        type: 'linear', display: true, position: 'right',
+                        grid: { drawOnChartArea: false },
+                        ticks: { color: '#ffae00' },
+                        min: 20, max: 40
+                    }
+                },
+                animation: false 
+            }
+        });
+
+        // --- 3. SOCKET IO LOGIC ---
+        const socket = io(socketUrl);
+        const statusDot = document.getElementById('connStatus');
+        const statusText = document.getElementById('connText');
+
+        socket.on("connect", () => {
+            console.log("Connected");
+            statusDot.style.backgroundColor = "var(--neon-green)";
+            statusDot.style.boxShadow = "0 0 10px var(--neon-green)";
+            statusText.innerText = "SYSTEM ONLINE";
+            statusText.style.color = "var(--neon-green)";
+        });
+
+        socket.on("disconnect", () => {
+            console.log("Disconnected");
+            statusDot.style.backgroundColor = "var(--neon-red)";
+            statusDot.style.boxShadow = "0 0 10px var(--neon-red)";
+            statusText.innerText = "OFFLINE";
+            statusText.style.color = "var(--neon-red)";
+            yoloConnected = false; // Reset status saat putus
+        });
+
+        // EVENT UTAMA DARI BACKEND
+        socket.on("update", (data) => {
+            yoloConnected = true; // Tandai YOLO terhubung
+
+            // A. Video Feed
+            if (data.video) {
+                document.getElementById("camFeed").src = "data:image/jpeg;base64," + data.video;
+            }
+
+            // B. Mapping Data YOLO
+            const people = data.people ?? 0;
+            const mask = data.mask ?? 0;
+            const nomask = data.nomask ?? 0;
+
+            document.getElementById("peopleCount").innerText = people;
+            document.getElementById("maskCount").innerText = mask;
+            document.getElementById("nomaskCount").innerText = nomask;
+
+            // C. Risk Status (Logic Baru)
+            const riskEl = document.getElementById("riskLevel");
+            if (nomask > 0 || people > 5) {
+                riskEl.innerText = "HIGH RISK";
+                riskEl.style.color = "var(--neon-red)";
+            } else if (mask < people) {
+                riskEl.innerText = "MODERATE";
+                riskEl.style.color = "var(--neon-amber)";
+            } else {
+                riskEl.innerText = "SAFE";
+                riskEl.style.color = "var(--neon-green)";
+            }
+
+            // D. Weather & Recs (Jika ada dari backend)
+            if (data.weather) {
+                document.getElementById("weatherTemp").innerText = data.weatherTemp + "°C";
+                document.getElementById("weatherDesc").innerText = data.weather;
+                document.getElementById("seasonBadge").innerText = "MUSIM " + data.season;
+                
+                const wIcon = document.getElementById("weatherIcon");
+                const wLower = data.weather.toLowerCase();
+                if(wLower.includes("rain")) wIcon.innerText = "🌧️";
+                else if(wLower.includes("cloud")) wIcon.innerText = "☁️";
+                else if(wLower.includes("storm")) wIcon.innerText = "⛈️";
+                else wIcon.innerText = "☀️";
+            }
+            
+            if (data.recommendation) {
+                document.getElementById("recText").innerText = data.recommendation;
+            }
+        });
+
+        // --- 4. CHECK YOLO CONNECTION (Interval 300ms) ---
+        setInterval(() => {
+            if (yoloConnected === false) {
+                // Reset Statistik ke 0 jika YOLO mati
+                document.getElementById("peopleCount").innerText = "0";
+                document.getElementById("maskCount").innerText = "0";
+                document.getElementById("nomaskCount").innerText = "0";
+                
+                // Reset Risk Status
+                const riskEl = document.getElementById("riskLevel");
+                riskEl.innerText = "SAFE";
+                riskEl.style.color = "var(--neon-green)";
+            }
+        }, 300);
+
+        // --- 5. DUMMY SENSOR (SMOOTH REALISTIC) ---
+        let tempNow = 28.0;
+        let humNow = 55;
+        let co2Now = 600;
+
+        function updateDummySensors() {
+            // Smooth drift temperature
+            tempNow += (Math.random() * 0.3 - 0.15);
+            tempNow = Math.max(24, Math.min(31, tempNow));
+
+            // Smooth drift humidity
+            humNow += (Math.random() * 2 - 1);
+            humNow = Math.max(40, Math.min(70, humNow));
+
+            // Smooth drift CO2
+            co2Now += (Math.random() * 20 - 10);
+            co2Now = Math.max(420, Math.min(1200, co2Now));
+
+            // Update UI
+            document.getElementById("tempVal").innerText = tempNow.toFixed(1) + "°C";
+            document.getElementById("humVal").innerText = Math.round(humNow) + "%";
+            document.getElementById("co2Val").innerText = Math.round(co2Now) + " ppm";
+
+            // Update Chart
+            envChart.data.datasets[0].data.push(Math.round(co2Now));
+            envChart.data.datasets[0].data.shift();
+
+            envChart.data.datasets[1].data.push(tempNow.toFixed(1));
+            envChart.data.datasets[1].data.shift();
+
+            envChart.update();
+        }
+
+        setInterval(updateDummySensors, 1500);
+
+        // --- 6. MICROPHONE REALTIME (Web Audio API) ---
+        async function initRealtimeMic() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = audioContext.createAnalyser();
+                const microphone = audioContext.createMediaStreamSource(stream);
+                
+                analyser.fftSize = 256;
+                microphone.connect(analyser);
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                function loop() {
+                    requestAnimationFrame(loop);
+                    analyser.getByteFrequencyData(dataArray);
+
+                    // Calculate RMS / dB estimate
+                    let sum = 0;
+                    for(let i = 0; i < dataArray.length; i++) {
+                        sum += dataArray[i];
+                    }
+                    let average = sum / dataArray.length;
+                    
+                    // Visual dB calculation
+                    let db = Math.round(20 * Math.log10(Math.max(average, 1)) + 10); 
+                    
+                    // Update UI
+                    const dbEl = document.getElementById("micDb");
+                    const alertEl = document.getElementById("coughAlert");
+
+                    if (dbEl) {
+                        dbEl.innerText = db + " dB";
+                        
+                        if (db > 65) {
+                            dbEl.style.color = "var(--neon-red)";
+                            if(alertEl) alertEl.style.opacity = "1";
+                        } else {
+                            dbEl.style.color = "var(--neon-purple)";
+                            if(alertEl) alertEl.style.opacity = "0";
+                        }
+                    }
+                }
+                loop();
+            } catch (err) {
+                console.error("Mic Error:", err);
+                const dbEl = document.getElementById("micDb");
+                if(dbEl) dbEl.innerText = "MIC OFF";
+            }
+        }
+        
+        initRealtimeMic();
+
+    </script>
+</body>
+</html>
